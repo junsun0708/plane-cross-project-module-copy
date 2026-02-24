@@ -25,8 +25,8 @@
 PLANE_BASE_URL=https://your-plane-url.com
 PLANE_API_KEY=your_api_key_here
 PLANE_WORKSPACE_SLUG=your_workspace_slug
-PLANE_SOURCE_PROJECT=에너지플랫폼  # 소스 프로젝트 이름 또는 ID
-PLANE_TARGET_PROJECT=CTO         # 대상 프로젝트 이름 또는 ID
+PLANE_SOURCE_PROJECT=prj1  # 소스 프로젝트 이름 또는 ID
+PLANE_TARGET_PROJECT=prj2         # 대상 프로젝트 이름 또는 ID
 ```
 
 ## 📋 사용 방법
@@ -38,7 +38,7 @@ PLANE_TARGET_PROJECT=CTO         # 대상 프로젝트 이름 또는 ID
 python3 plane_migrate.py --dry-run --module "ETC"
 
 # 프로젝트 명시적 지정 (이름 또는 ID)
-python3 plane_migrate.py --dry-run --source "에너지플랫폼" --target "CTO" --module "ETC"
+python3 plane_migrate.py --dry-run --source "prj1" --target "prj2" --module "ETC"
 ```
 
 ### 2. 실제 복제 실행
