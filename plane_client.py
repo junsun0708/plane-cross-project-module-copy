@@ -32,13 +32,14 @@ class PlaneAPI:
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
         url = self._url(path)
-        max_retries = 3
-        retry_delay = 2
+        max_retries = 5
+        base_delay = 2
         
         for i in range(max_retries):
             resp = self.session.request(method, url, **kwargs)
             if resp.status_code == 429:
-                wait = retry_delay * (i + 1)
+                # 지수 백오프 (2^i * base_delay)
+                wait = (2 ** i) * base_delay
                 print(f"  ⚠ Rate limit (429) hit. Waiting {wait}s before retry...")
                 time.sleep(wait)
                 continue

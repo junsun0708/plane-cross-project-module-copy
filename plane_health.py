@@ -34,8 +34,8 @@ def check_health(api: PlaneAPI, project_name: str, level: int = 0):
         sid = wi.get('state')
         group = state_group_map.get(sid)
         
-        # 완료되거나 취소된 건은 체크 제외
-        if group in ['completed', 'cancelled']:
+        # 완료되거나 취소된 건, 그리고 백로그에 있는 건은 체크 제외
+        if group in ['completed', 'cancelled', 'backlog']:
             continue
 
         reasons = []

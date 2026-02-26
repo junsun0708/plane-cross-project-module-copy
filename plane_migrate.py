@@ -10,6 +10,12 @@ Usage:
     python plane_migrate.py --module "모듈명" # 특정 모듈만 복제 (대화형 선택 건너뜀)
 """
 
+import os
+import sys
+import argparse
+import time
+import requests
+from typing import Any
 from plane_client import PlaneAPI, load_env_manual
 
 load_env_manual()
@@ -30,6 +36,28 @@ def build_name_mapping(source_items: list[dict], target_items: list[dict]) -> di
         name = item["name"]
         if name in target_by_name:
             mapping[item["id"]] = target_by_name[name]
+    return mapping
+
+
+def build_state_mapping(source_states: list[dict], target_states: list[dict]) -> dict[str, str]:
+    """상태(State) 매핑: 1차로 이름 기반, 매칭 실패 시 2차로 그룹 기반 매핑"""
+    # 1. 이름 기반 매핑
+    mapping = build_name_mapping(source_states, target_states)
+    
+    # 2. 매칭되지 않은 소스 상태에 대해 그룹 기반 매핑 시도
+    target_by_group: dict[str, str] = {}
+    for s in target_states:
+        # 각 그룹의 첫 번째 상태를 대표로 사용
+        if s["group"] not in target_by_group:
+            target_by_group[s["group"]] = s["id"]
+            
+    for s in source_states:
+        src_id = s["id"]
+        group = s["group"]
+        if src_id not in mapping and group in target_by_group:
+            # 이름은 다르지만 그룹(completed, started 등)이 같은 대상 상태로 연결
+            mapping[src_id] = target_by_group[group]
+            
     return mapping
 
 
@@ -59,31 +87,45 @@ def build_cycle_mapping(source_cycles: list[dict], target_cycles: list[dict]) ->
 
 
 def build_estimate_mapping(api: PlaneAPI, source_project_id: str, target_project_id: str) -> dict[str, str]:
-    """추정치(Estimate Point) 값 기반 매핑"""
+    """추정치(Estimate Point) 값 기반 매핑 (프로젝트별 추정 체계 반영)"""
     mapping = {}
     try:
-        # 1. 소스 프로젝트 추정 체계 정보 수집
-        src_estimates = api.list_estimates(source_project_id)
-        src_points_by_value = {}
-        for est in src_estimates:
-            pts = api.list_estimate_points(source_project_id, est["id"])
-            for p in pts:
-                src_points_by_value[str(p["value"])] = p["id"]
+        # 1. 소스 프로젝트의 활성 추정 체계(Estimate System) 확인
+        src_project = api._get(f"projects/{source_project_id}/")
+        src_est_id = src_project.get("estimate")
+        
+        # 2. 대상 프로젝트의 활성 추정 체계 확인
+        tgt_project = api._get(f"projects/{target_project_id}/")
+        tgt_est_id = tgt_project.get("estimate")
 
-        # 2. 대상 프로젝트 추정 체계 정보 수집
-        tgt_estimates = api.list_estimates(target_project_id)
-        tgt_points_by_value = {}
-        for est in tgt_estimates:
-            pts = api.list_estimate_points(target_project_id, est["id"])
-            for p in pts:
-                tgt_points_by_value[str(p["value"])] = p["id"]
+        if not src_est_id or not tgt_est_id:
+            # 프로젝트 설정에서 ID를 못 찾을 경우 list_estimates로 fallback
+            print("  ⚠ 프로젝트 상세 정보에서 추정 체계 ID를 찾을 수 없습니다. 목록 조회를 시도합니다.")
+            src_estimates = api.list_estimates(source_project_id)
+            tgt_estimates = api.list_estimates(target_project_id)
+            if src_estimates: src_est_id = src_estimates[0]["id"]
+            if tgt_estimates: tgt_est_id = tgt_estimates[0]["id"]
 
-        # 3. 값 매칭을 통한 ID 매핑 생성
+        if not src_est_id or not tgt_est_id:
+            print("  ⚠ 양쪽 프로젝트 중 한 곳에 활성화된 추정 체계가 없습니다.")
+            return {}
+
+        # 3. 소스 포인트 값 수집
+        src_points = api.list_estimate_points(source_project_id, src_est_id)
+        src_points_by_value = {str(p["value"]): p["id"] for p in src_points}
+
+        # 4. 대상 포인트 값 수집
+        tgt_points = api.list_estimate_points(target_project_id, tgt_est_id)
+        tgt_points_by_value = {str(p["value"]): p["id"] for p in tgt_points}
+
+        # 5. 값 매칭을 통한 ID 매핑 생성
         for val, src_id in src_points_by_value.items():
             if val in tgt_points_by_value:
                 mapping[src_id] = tgt_points_by_value[val]
+                
+        print(f"  ✓ 추정치 매핑 완료 ({len(mapping)}개 포인트)")
     except Exception as e:
-        print(f"  ⚠ 추정치 정보를 가져올 수 없습니다. 스킵합니다. ({e})")
+        print(f"  ⚠ 추정치 정보를 가져오는 중 오류 발생: {e}")
             
     return mapping
 
@@ -253,7 +295,7 @@ def migrate(api: PlaneAPI, source_project_name: str, target_project_name: str,
     print("\n[3/7] 매핑 데이터(State, Label, User, Cycle) 수집 중...")
     src_states = api.list_states(src_pid)
     tgt_states = api.list_states(tgt_pid)
-    state_mapping = build_name_mapping(src_states, tgt_states)
+    state_mapping = build_state_mapping(src_states, tgt_states)
 
     src_labels = api.list_labels(src_pid)
     tgt_labels = api.list_labels(tgt_pid)
@@ -502,12 +544,12 @@ def migrate(api: PlaneAPI, source_project_name: str, target_project_name: str,
                     })
 
                 # API rate limiting 방지 (더 안전하게 연장)
-                time.sleep(2.0)
+                time.sleep(3.0)
 
             except requests.HTTPError as e:
                 print(f"    [{i}/{len(sorted_items)}] ✗ {wi.get('name', 'Untitled')}: {e}")
                 # _request 메서드에서 이미 400 응답 내용을 출력함
-                time.sleep(2.0)
+                time.sleep(3.0)
 
         # 모듈에 Work Items 연결
         if created_in_module:
