@@ -1,19 +1,21 @@
 import os
 import json
-from plane_migrate import PlaneAPI
+import argparse
+import sys
+from plane_client import PlaneAPI, load_env_manual
 
 def check_data():
-    def load_env_manual(file_path=".env"):
-        if not os.path.exists(file_path): return
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"): continue
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    os.environ[key.strip()] = value.strip().strip('"').strip("'")
-
     load_env_manual()
+    
+    parser = argparse.ArgumentParser(description="Check Plane API data and structure")
+    parser.add_argument("--project", type=str, default=os.environ.get("PLANE_SOURCE_PROJECT"), help="Project name or ID")
+    
+    args = parser.parse_args()
+    
+    if not args.project:
+        print("Error: Project name or ID is required.")
+        sys.exit(1)
+
     api = PlaneAPI(os.environ["PLANE_BASE_URL"], os.environ["PLANE_API_KEY"], os.environ["PLANE_WORKSPACE_SLUG"])
     
     print("--- Members ---")
@@ -25,7 +27,10 @@ def check_data():
         sample = members[0].get('member', members[0])
         print("Sample User Info:", json.dumps(sample, indent=2, ensure_ascii=False))
 
-    p_id = "26b20311-c3ef-40ed-8879-c0d98dc2df5f" # 에너지플랫폼
+    # Resolve Project ID
+    project = api.find_project_by_name(args.project) or {'id': args.project, 'name': args.project}
+    p_id = project['id']
+    print(f"\n--- Project: {project['name']} ({p_id}) ---")
 
     print("\n--- Cycles ---")
     try:

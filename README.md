@@ -35,30 +35,74 @@ PLANE_TARGET_PROJECT=prj2         # 대상 프로젝트 이름 또는 ID
 실제 데이터를 생성하지 않고 어떤 데이터가 복제될지 목록만 확인합니다. 프로젝트를 생략하면 `.env`에 설정된 기본값이 사용됩니다.
 ```bash
 # 기본 프로젝트 사용
-python3 plane_migrate.py --dry-run --module "ETC"
-
-# 프로젝트 명시적 지정 (이름 또는 ID)
-python3 plane_migrate.py --dry-run --source "prj1" --target "prj2" --module "ETC"
+### 1. 프로젝트 진행 현황 리포트
+```bash
+python3 plane_report.py --project "프로젝트명"
 ```
 
-### 2. 실제 복제 실행
-특정 모듈을 지정하여 마이그레이션을 진행합니다.
+### 2. 프로젝트 건강도 (정합성) 체크
+데이터 누락이나 지연된 작업을 찾아냅니다. 기본적으로 **마감일이 지난 티켓**만 보여주며, 옵션을 통해 검사 범위를 넓힐 수 있습니다.
+```bash
+# 기본: 지연된 티켓만 검사
+python3 plane_health.py --project "프로젝트명"
+
+# -1: 지연 티켓 + 담당자 누락 추가 검사
+python3 plane_health.py --project "프로젝트명" -1
+
+# -2: 지연 티켓 + 담당자 누락 + 설명 부실 추가 검사
+python3 plane_health.py --project "프로젝트명" -2
+
+# -3: 전체 검사 (마감일 누락 포함 모든 권고 사항)
+python3 plane_health.py --project "프로젝트명" -3
+```
+
+| 레벨 | 옵션 | 검사 항목 |
+| :--- | :--- | :--- |
+| **0** | (기본) | 마감일이 어제보다 이전인 티켓 (일정 지연) |
+| **1** | `-1` | 담당자(Assignee)가 지정되지 않은 티켓 추가 |
+| **2** | `-2` | 설명(Description)이 없거나 너무 짧은 티켓 추가 |
+| **3** | `-3` | 진행 중인데 마감일이 없는 티켓 등 모든 항목 검사 |
+
+### 3. 모듈 마이그레이션
 ```bash
 python3 plane_migrate.py --source "소스프로젝트명" --target "대상프로젝트명" --module "모듈명"
 ```
 
-### 3. 대화형 실행
-모듈 이름을 지정하지 않으면 사용 가능한 모듈 목록이 출력되며 번호를 선택할 수 있습니다.
+### 4. 벌크 작업 (상태별 티켓 조회 및 처리)
+특정 상태의 티켓들을 한꺼번에 조회하거나 처리 대상 목록을 확인합니다.
 ```bash
-python3 plane_migrate.py
+# 진행 중(In Progress)인 티켓 목록 조회
+python3 plane_bulk.py --project "프로젝트명" --action list-started
+
+# 대기 중(Backlog)인 티켓 목록 조회
+python3 plane_bulk.py --project "프로젝트명" --action list-backlog
+
+# 시작 전(Todo)인 티켓 목록 조회
+python3 plane_bulk.py --project "프로젝트명" --action list-unstarted
+
+# 완료된 티켓 목록 조회
+python3 plane_bulk.py --project "프로젝트명" --action list-completed
+
+# 완료된 티켓 아카이브 대상 확인 (Dry-run)
+python3 plane_bulk.py --project "프로젝트명" --action archive-completed
 ```
 
+| 액션명 | 설명 |
+| :--- | :--- |
+| `list-backlog` | 백로그 상태의 티켓 목록 출력 |
+| `list-unstarted` | 아직 시작하지 않은(Todo) 티켓 목록 출력 |
+| `list-started` | 진행 중(In Progress)인 티켓 목록 출력 |
+| `list-completed` | 완료된 티켓 목록 출력 |
+| `archive-completed` | 완료된 티켓의 아카이브/삭제 대상 확인 |
+
 ## 📂 파일 구조 및 설명
-- `plane_migrate.py`: **메인 마이그레이션 스크립트**. 모듈 및 하위 이슈 복제 로직의 핵심입니다.
-- `check_projects.py`: 워크스페이스 내 프로젝트 목록 및 특정 프로젝트의 모듈 정보를 조회합니다.
-- `check_api_data.py`: 사용자(Member), 주기(Cycle), 추정치(Estimate) 등 API 연동 데이터를 사전에 검증합니다.
-- `debug_ids.py`: 소스 프로젝트와 대상 프로젝트 간의 데이터 매핑 상태를 디버깅하는 도구입니다.
-- `logs/`: 마이그레이션 실행 결과(`*.txt`) 및 분석용 샘플 데이터(`*.json`)가 보관되는 폴더입니다.
+- `plane_client.py`: **공통 API 클라이언트**. 모든 도구의 기반이 되는 핵심 모듈입니다.
+- `plane_migrate.py`: **모듈 및 이슈 복제**. 프로젝트 간 데이터 이전용 도구입니다.
+- `plane_report.py`: **진행 현황 리포트**. 프로젝트 요약 및 리포팅 도구입니다.
+- `plane_health.py`: **건강도 체크**. 운영 규칙 준수 여부 및 데이터 누락 검사 도구입니다.
+- `plane_bulk.py`: **벌크 액션**. 대량 작업(조회/아카이브 대상 확인 등)을 위한 도구입니다.
+- `check_projects.py` & `check_api_data.py`: 사전 검증 및 디버깅을 위한 보조 도구입니다.
+- `logs/`: 각 도구의 실행 결과 및 분석 데이터가 보관되는 폴더입니다.
 
 ## 💡 주의 및 참고 사항
 - **사용자 매핑**: 소스 프로젝트와 대상 프로젝트에 참여한 사용자의 **이메일**이 일치해야 담당자가 정상적으로 지정됩니다.

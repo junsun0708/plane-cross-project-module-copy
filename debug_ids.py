@@ -1,28 +1,46 @@
 import os
 import json
-from plane_migrate import PlaneAPI
+import argparse
+import sys
+from plane_client import PlaneAPI, load_env_manual
 
 def debug_ids():
-    def load_env_manual(file_path=".env"):
-        if not os.path.exists(file_path): return
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"): continue
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    os.environ[key.strip()] = value.strip().strip('"').strip("'")
-
     load_env_manual()
+    
+    parser = argparse.ArgumentParser(description="Debug Plane IDs and Module issue mapping")
+    parser.add_argument("--project", type=str, default=os.environ.get("PLANE_SOURCE_PROJECT"), help="Project name or ID")
+    parser.add_argument("--module", type=str, help="Module name or ID")
+    
+    args = parser.parse_args()
+    
+    if not args.project:
+        print("Error: Project name or ID is required.")
+        sys.exit(1)
+
     api = PlaneAPI(os.environ["PLANE_BASE_URL"], os.environ["PLANE_API_KEY"], os.environ["PLANE_WORKSPACE_SLUG"])
     
-    # 에너지플랫폼 ID
-    p_id = "26b20311-c3ef-40ed-8879-c0d98dc2df5f"
-    # ETC 모듈 ID
-    m_id = "d2ba6578-831d-4f62-9f7d-0971fce888c3"
+    # Resolve Project ID
+    project = api.find_project_by_name(args.project) or {'id': args.project, 'name': args.project}
+    p_id = project['id']
+    print(f"Project: {project['name']} ({p_id})")
     
-    print("Fetching Module Issues...")
-    module_issues = api.list_module_work_items(p_id, m_id)
+    # Resolve Module ID if provided
+    m_id = args.module
+    if args.module and len(args.module) < 30: # Assume it's a name if short
+        modules = api.list_modules(p_id)
+        for m in modules:
+            if m['name'] == args.module:
+                m_id = m['id']
+                print(f"Module: {m['name']} ({m_id})")
+                break
+    
+    if not m_id:
+        print("Warning: No module ID/name provided or found. Skipping module-specific checks.")
+        module_issues = []
+    else:
+        print(f"Fetching Module Issues for {m_id}...")
+        module_issues = api.list_module_work_items(p_id, m_id)
+    
     mod_ids = [mi.get('id') for mi in module_issues]
     
     print("Fetching All Project Issues...")
